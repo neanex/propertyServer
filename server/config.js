@@ -32,7 +32,8 @@ var config ={
 		scope: ['data:read', 'data:search', 'bucket:read', 'viewables:read' ]
 	},
 	callback: process.env.FORGE_CALLBACK,
-	apiEndpoint: 'developer.api.autodesk.com'
+	apiEndpoint: 'developer.api.autodesk.com',
+	port: process.env.PORT || defaults.PORT
 
 } ;
 
