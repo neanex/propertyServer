@@ -23,10 +23,15 @@
 process.env.TMPDIR = 'tmp';
 //process.env ['NODE_TLS_REJECT_UNAUTHORIZED'] ='0' ; // Ignore 'UNABLE_TO_VERIFY_LEAF_SIGNATURE' authorization error
 
+var defaults = require('./server/defaults');
+var config = require('./server/config');
 var app = require('./server/server');
 
 var server = app.listen(app.get('port'), function () {
-	console.log('API key ' + process.env.FORGE_CLIENT_ID);
+	var client_id = config.credentials.client_id;
+	if (client_id !== defaults.FORGE_CLIENT_ID) {
+		console.log('API key ' + client_id);
+	}
 	console.log('Server listening on port ' + server.address().port);
 });
 
