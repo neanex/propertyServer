@@ -29,11 +29,22 @@ var config ={
 		client_id: process.env.FORGE_CLIENT_ID || defaults.FORGE_CLIENT_ID,
 		client_secret: process.env.FORGE_CLIENT_SECRET || defaults.FORGE_CLIENT_SECRET,
 		grant_type: 'client_credentials',
-		scope: ['data:read', 'data:search', 'bucket:read', 'viewables:read' ]
+		scope: ['data:read', 'data:search', 'bucket:read', 'viewables:read' ],
+
+		hasDefaults: function() {
+			var isDefaultClientId = this.client_id === defaults.FORGE_CLIENT_ID;
+			var isDefaultClientSecret = this.client_secret === defaults.FORGE_CLIENT_SECRET;
+			return isDefaultClientId || isDefaultClientSecret;
+		}
+
 	},
 	callback: process.env.FORGE_CALLBACK,
 	apiEndpoint: 'developer.api.autodesk.com',
-	port: process.env.PORT || defaults.PORT
+	port: process.env.PORT || defaults.PORT,
+
+	hasCallback: function() {
+		return this.callback !== undefined;
+	}
 
 } ;
 
