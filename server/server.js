@@ -19,6 +19,7 @@
 //
 'use strict' ;
 
+var config = require('./config');
 var express =require ('express') ;
 var bodyParser =require ('body-parser') ;
 var forgeToken =require ('./forge-token') ;
@@ -28,6 +29,6 @@ var app =express () ;
 app.use (bodyParser.json ()) ;
 app.use('/', require('./3legged'));
 app.use ('/data', require ('./properties')) ;
-app.set ('port', process.env.PORT || 80) ; // main port
+app.set ('port', config.port) ; // main port
 
 module.exports =app ;
