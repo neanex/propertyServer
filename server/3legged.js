@@ -32,19 +32,21 @@ router.get ('/3legged', function (req, res) {
 	res.redirect (forgeToken3.authorizeUrl ()) ;
 }) ;
 
-var q =url.parse (config.callback, true) ;
-router.get (q.pathname, function (req, res) {
-	var qs =querystring.parse (req._parsedUrl.query) ;
-	//console.log (qs) ;
-	var code =qs.code ;
-	forgeToken3.getToken (code)
-		.then (function (response) {
-			console.log (JSON.stringify (response.credentials)) ;
-			res.json (response.credentials) ;
-		})
-		.catch (function (error) {
-			console.error ('Getting token failed! ' + error) ;
-		}) ;
-}) ;
+if (config.callback !== undefined) {
+	var q =url.parse (config.callback, true) ;
+	router.get (q.pathname, function (req, res) {
+		var qs =querystring.parse (req._parsedUrl.query) ;
+		//console.log (qs) ;
+		var code =qs.code ;
+		forgeToken3.getToken (code)
+			.then (function (response) {
+				console.log (JSON.stringify (response.credentials)) ;
+				res.json (response.credentials) ;
+			})
+			.catch (function (error) {
+				console.error ('Getting token failed! ' + error) ;
+			}) ;
+	}) ;
+}
 
 module.exports =router ;
