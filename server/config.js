@@ -19,13 +19,15 @@
 //
 'use strict' ;
 
+var defaults = require('./defaults');
+
 var config ={
 
 	credentials: {
 		// Replace placeholder below by the Consumer Key and Consumer Secret you got from
 		// http://developer.autodesk.com/ for the production server
-		client_id: process.env.FORGE_CLIENT_ID || '<replace with your consumer key>',
-		client_secret: process.env.FORGE_CLIENT_SECRET || '<replace with your consumer secret>',
+		client_id: process.env.FORGE_CLIENT_ID || defaults.FORGE_CLIENT_ID,
+		client_secret: process.env.FORGE_CLIENT_SECRET || defaults.FORGE_CLIENT_SECRET,
 		grant_type: 'client_credentials',
 		scope: ['data:read', 'data:search', 'bucket:read', 'viewables:read' ]
 	},
