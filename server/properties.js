@@ -28,7 +28,9 @@ var moment =require ('moment') ;
 var ForgeSDK =require ('forge-apis') ;
 var config =require ('./config') ;
 var utils =require ('./utils') ;
-var forgeToken =require ('./forge-token') ;
+var forgeToken = config.credentials.hasDefaults()
+	? require('./forge-token-multi-credentials')
+	: require('./forge-token');
 
 var router =express.Router () ;
 
@@ -255,7 +257,9 @@ var jobs ={} ;
 class BubbleAccess {
 
 	static getManifest (urn, _forgeToken) {
-		_forgeToken =_forgeToken || forgeToken ;
+		_forgeToken = _forgeToken || config.credentials.hasDefaults()
+			? forgeToken.get(urn)
+			: forgeToken;
 		// Verify the required parameter 'urn' is set
 		if ( urn === undefined || urn === null )
 			return (Promise.reject ("Missing the required parameter 'urn' when calling getManifest")) ;
@@ -414,7 +418,9 @@ class BubbleAccess {
 	}
 
 	static downloadItem (urn, _forgeToken) {
-		_forgeToken =_forgeToken || forgeToken ;
+		_forgeToken = _forgeToken || config.credentials.hasDefaults()
+			? forgeToken.get(urn)
+			: forgeToken;
 		// Verify the required parameter 'urn' is set
 		if ( urn === undefined || urn === null )
 			return (Promise.reject ("Missing the required parameter 'urn' when calling downloadItem")) ;
@@ -516,13 +522,18 @@ router.get ('/:urn/load', function (req, res) {
 	var urn =utils._safeBase64encode (req.params.urn) ;
 	if ( jobs.hasOwnProperty (urn) && jobs [urn].status !== 'failed' )
 		return (res.status (201).json (jobs [urn])) ;
-	var bearer =utils.authorization (req) ;
-	var localForgeToken =forgeToken ;
-	if ( bearer !== null ) {
-		localForgeToken =new ForgeSDK.AuthClientTwoLegged (config.credentials.client_id, config.credentials.client_secret, config.credentials.scope) ;
-		localForgeToken.credentials.token_type ='Bearer' ;
-		localForgeToken.credentials.expires_in =3599 ;
-		localForgeToken.credentials.access_token =bearer ;
+	let localForgeToken;
+	if (config.credentials.hasDefaults()) {
+		localForgeToken = forgeToken.get(urn);
+	} else {
+		var bearer =utils.authorization (req) ;
+		localForgeToken =forgeToken ;
+		if ( bearer !== null ) {
+			localForgeToken =new ForgeSDK.AuthClientTwoLegged (config.credentials.client_id, config.credentials.client_secret, config.credentials.scope) ;
+			localForgeToken.credentials.token_type ='Bearer' ;
+			localForgeToken.credentials.expires_in =3599 ;
+			localForgeToken.credentials.access_token =bearer ;
+		}
 	}
 	var outPath =utils.dataPath ('', '') ;
 	jobs [urn] ={ status: 'accepted' } ;
