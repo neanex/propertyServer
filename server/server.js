@@ -22,12 +22,16 @@
 var config = require('./config');
 var express =require ('express') ;
 var bodyParser =require ('body-parser') ;
-var forgeToken =require ('./forge-token') ;
+var forgeToken = config.credentials.hasDefaults()
+    ? null
+    : require('./forge-token');
 
 var app =express () ;
 //app.use (bodyParser.urlencoded ({ extended: true })) ;
 app.use (bodyParser.json ()) ;
-app.use('/', require('./3legged'));
+if (config.hasCallback()) {
+    app.use('/', require('./3legged'));
+}
 app.use ('/data', require ('./properties')) ;
 app.set ('port', config.port) ; // main port
 
