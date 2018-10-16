@@ -1,3 +1,5 @@
+const AuthClient = require('./AuthClientMultiCredentials');
+
 const multiAuth = {};
 
 module.exports = {
