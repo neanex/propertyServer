@@ -668,7 +668,7 @@ router.get ('/:urn/ids/*', function (req, res) {
 		}) ;
 }) ;
 
-router.get('/refreshToken', (req, res) => {
+router.post('/refreshToken', (req, res) => {
 	const { clientId, urn, token } = req.body;
 	forgeToken.refresh({ clientId, urn, token });
 	res.status(200).json({ status: 'tokenRefreshed' });
