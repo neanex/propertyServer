@@ -562,19 +562,22 @@ router.get ('/:urn/load', function (req, res) {
 		}) ;
 }) ;
 
-router.delete ('/:urn', function (req, res) {
-	var urn =utils._safeBase64encode (req.params.urn) ;
-	if ( jobs.hasOwnProperty (urn) )
-		delete jobs [urn] ;
-	var outPath =utils.dataPath (urn, '') ;
-	utils.rimraf (outPath)
-		.then (function (pathname) {
-			res.status (200).end () ;
+router.delete('/:urn', (req, res) => {
+	const urn = utils._safeBase64encode(req.params.urn);
+	if (jobs.hasOwnProperty(urn)) {
+		delete jobs[urn];
+	}
+	if (config.credentials.hasDefaults() && forgeToken.get(urn)) {
+		forgeToken.remove(urn);
+	}
+	utils.rimraf(utils.dataPath(urn, ''))
+		.then(() => {
+			res.status(200).end();
 		})
-		.catch (function (err) {
-			res.status (500).end () ;
-		}) ;
-}) ;
+		.catch(() => {
+			res.status(500).end();
+		});
+});
 
 // Request Object(s)' properties
 // set the structure to be equal to the metadata MD payload
