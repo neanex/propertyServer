@@ -17,23 +17,22 @@
 // Forge Property Server
 // by Cyrille Fauvel - Autodesk Developer Network (ADN)
 //
-'use strict' ;
+'use strict';
 
-var defaults = require('./defaults');
+const defaults = require('./defaults');
 
-var config ={
-
+const config = {
 	credentials: {
 		// Replace placeholder below by the Consumer Key and Consumer Secret you got from
 		// http://developer.autodesk.com/ for the production server
 		client_id: process.env.FORGE_CLIENT_ID || defaults.FORGE_CLIENT_ID,
 		client_secret: process.env.FORGE_CLIENT_SECRET || defaults.FORGE_CLIENT_SECRET,
 		grant_type: 'client_credentials',
-		scope: ['data:read', 'data:search', 'bucket:read', 'viewables:read' ],
+		scope: ['data:read', 'data:search', 'bucket:read', 'viewables:read'],
 
-		hasDefaults: function() {
-			var isDefaultClientId = this.client_id === defaults.FORGE_CLIENT_ID;
-			var isDefaultClientSecret = this.client_secret === defaults.FORGE_CLIENT_SECRET;
+		hasDefaults: () => {
+			const isDefaultClientId = this.client_id === defaults.FORGE_CLIENT_ID;
+			const isDefaultClientSecret = this.client_secret === defaults.FORGE_CLIENT_SECRET;
 			return isDefaultClientId || isDefaultClientSecret;
 		}
 
@@ -42,10 +41,7 @@ var config ={
 	apiEndpoint: 'developer.api.autodesk.com',
 	port: process.env.PORT || defaults.PORT,
 
-	hasCallback: function() {
-		return this.callback !== undefined;
-	}
+	hasCallback: () => this.callback !== undefined
+};
 
-} ;
-
-module.exports =config ;
+module.exports = config;
