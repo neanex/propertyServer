@@ -19,29 +19,6 @@ assert.equal(
     forgeToken.get(URN),
 );
 
-assert.equal(
-    typeof oAuth2Client.setCredentials,
-    'function',
-);
-
-oAuth2Client.setCredentials({
-    access_token: 'abcd',
-});
-assert.deepEqual(
-    oAuth2Client.getCredentials(),
-    { access_token: 'abcd' },
-);
-
-const futureTime = new Date(Date.now() + 300 * 1000);
-oAuth2Client.setCredentials({
-    access_token: 'abcd',
-    expires_at: futureTime,
-});
-assert.equal(
-    oAuth2Client.isAuthorized(),
-    true,
-);
-
 oAuth2Client
     .authenticate()
     .then((response) => {
