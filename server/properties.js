@@ -668,4 +668,10 @@ router.get ('/:urn/ids/*', function (req, res) {
 		}) ;
 }) ;
 
-module.exports =router ;
+router.get('/refreshToken', (req, res) => {
+	const { clientId, urn, token } = req.body;
+	forgeToken.refresh({ clientId, urn, token });
+	res.status(200).json({ status: 'tokenRefreshed' });
+});
+
+module.exports = router;
