@@ -5,7 +5,8 @@
   "main": "start.js",
   "scripts": {
     "start": "NODE_ENV=production node start.js",
-    "dev": "node start.js"
+    "dev": "node start.js",
+    "test": "node ./tests/forge-token-multi-credentials.test.js"
   },
   "repository": {
     "type": "git",
