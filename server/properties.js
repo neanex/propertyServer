@@ -17,655 +17,686 @@
 // Forge Property Server
 // by Cyrille Fauvel - Autodesk Developer Network (ADN)
 //
-'use strict'; // http://www.w3schools.com/js/js_strict.asp
 
-var express =require ('express') ;
-var path =require ('path') ;
-var fs =require ('fs') ;
-var zlib = require('zlib') ;
-var mkdirp =require ('mkdirp') ;
-var moment =require ('moment') ;
-var ForgeSDK =require ('forge-apis') ;
-var config =require ('./config') ;
-var utils =require ('./utils') ;
-var forgeToken =require ('./forge-token') ;
+/* eslint class-methods-use-this: 0 */
+/* eslint lines-between-class-members: 0 */
+/* eslint array-callback-return: 0 */
+/* eslint consistent-return: 0 */
+/* eslint no-underscore-dangle: 0 */
+/* eslint no-continue: 0 */
+/* eslint no-plusplus: 0 */
+/* eslint no-prototype-builtins: 0 */
+/* eslint no-param-reassign: 0 */
+/* eslint no-console: 0 */
+/* eslint no-bitwise: 0 */
+/* eslint no-unused-vars: 0 */
 
-var router =express.Router () ;
+const express = require('express');
+const path = require('path');
+const fs = require('fs');
+const zlib = require('zlib');
+const mkdirp = require('mkdirp');
+const moment = require('moment');
+const {
+    AuthClientTwoLegged,
+    DerivativesApi,
+} = require('forge-apis');
+const config = require('./config');
+const utils = require('./utils');
 
-var propertiesDict ={} ;
-setInterval (
-	function () {
-		Object.keys (propertiesDict).forEach (function (key) {
-			if ( !propertiesDict.hasOwnProperty (key) || !propertiesDict [key].hasOwnProperty ('tm') )
-				return ;
-			if ( propertiesDict [key].tm.isBefore (moment ()) )
-				delete propertiesDict [key] ;
-		}) ;
-	},
-	10000 // 10 seconds
-) ;
+const forgeToken = require('./token');
+
+const getUrn = ({ params: { urn } }) => utils._safeBase64encode(urn);
+
+const getToken = (urn, token) => token || (
+    config.credentials.HAS_DEFAULTS
+        ? forgeToken.get(urn)
+        : forgeToken
+);
+
+const router = express.Router();
+
+const propertiesDict = {};
+
+setInterval(
+    () => {
+        Object.keys(propertiesDict).forEach((key) => {
+            if (!propertiesDict.hasOwnProperty(key) || !propertiesDict[key].hasOwnProperty('tm')) {
+                return;
+            }
+            if (propertiesDict[key].tm.isBefore(moment())) {
+                delete propertiesDict[key];
+            }
+        });
+    },
+    10000, // 10 seconds
+);
 
 class JsonProperties {
+    constructor(urn) {
+        this.urn = urn;
+        this.offs = null;
+        this.avs = null;
+        this.vals = null;
+        this.attrs = null;
+        this.ids = null;
+    }
 
-	constructor (urn) {
-		this.urn =urn ;
-		this.offs =null ;
-		this.avs =null ;
-		this.vals =null ;
-		this.attrs =null ;
-		this.ids =null ;
-	}
+    static get dbs() {
+        return (['objects_offs', 'objects_avs', 'objects_vals', 'objects_attrs', 'objects_ids']);
+    }
 
-	static get dbs () {
-		return (['objects_offs', 'objects_avs', 'objects_vals', 'objects_attrs', 'objects_ids']) ;
-	}
+    static get iNAME() { return (0); }
 
-	static get iNAME () { return (0) ; }
-	static get iCATEGORY () { return (1) ; }
-	static get iTYPE () { return (2) ; } // Type (1 = Boolean, 2 = Color, 3 = Numeric, 11 = ObjectReference, 20 = String)
-	static get iUNIT () { return (3) ; }
-	// The PropertyDB use GNU Units to specify units of properties. For compound units, like for density,
-	// which don’t have an atomic name you can for expressions like kg/m^3
-	static get DESCRIPTION () { return (4) ; }
-	static get iDISPLAYNAME () { return (5) ; }
-	static get iFLAGS () { return (6) ; }
-	static get iDISPLAYPRECISION( ) { return (7) ; }
+    static get iCATEGORY() { return (1); }
 
-	static get tBoolean () { return (1) ; }
-	static get tColor () { return (2) ; }
-	static get tNumeric () { return (3) ; }
-	static get tObjectReference () { return (11) ; }
-	static get tString () { return (20) ; }
-	static get tString2 () { return (21) ; }
+    static get iTYPE() { return (2); }
+    // Type (1 = Boolean, 2 = Color, 3 = Numeric, 11 = ObjectReference, 20 = String)
+    static get iUNIT() { return (3); }
 
-	get idMax () {
-		return (this.offs.length - 1) ;
-	}
+    // The PropertyDB use GNU Units to specify units of properties.
+    // For compound units, like for density,
+    // which don’t have an atomic name you can for expressions like kg/m^3
+    static get DESCRIPTION() { return (4); }
 
-	load (dbPath) {
-		var self =this ;
-		return (new Promise (function (fulfill, reject) {
-			if ( propertiesDict.hasOwnProperty (dbPath) ) {
-				self =propertiesDict [self.urn] ;
-				propertiesDict [self.urn].tm =moment ().add (1, 'minutes') ;
-				fulfill (self) ;
-				return ;
-			}
-			self._load (dbPath)
-				.then (function (results) {
-					propertiesDict [self.urn] =self ;
-					propertiesDict [self.urn].tm =moment ().add (1, 'minutes') ;
-					JsonProperties.dbs.map (function (elt, index) {
-						var name =elt.substring (8) ;
-						self [name] =results [index] ;
-					}) ;
-					fulfill (self) ;
-				})
-				.catch (function (error) {
-					reject (error) ;
-				}) ;
-		})) ;
-	}
+    static get iDISPLAYNAME() { return (5); }
 
-	readFull (dbId, includeParents) {
-		includeParents =includeParents || false ;
-		dbId =parseInt (dbId) ;
-		var result ={
-			objectid: dbId,
-			guid: this.ids [dbId],
-			properties: {},
-			parents: []
-		} ;
-		var parent =this._readFull (dbId, result) ;
-		while ( includeParents === true && parent !== null && parent !== 1 )
-			parent =this._readFull (parent, result, includeParents) ;
-		result.properties =Object.keys (result.properties).map (function (elt) { return (result.properties [elt]) ; }) ;
-		return (result) ;
-	}
+    static get iFLAGS() { return (6); }
 
-	read (dbId) {
-		dbId =parseInt (dbId) ;
-		var result ={
-			objectid: dbId,
-			name: '',
-			externalId: this.ids [dbId],
-			properties: {}
-		} ;
-		var parent =this._read (dbId, result) ;
-		//while ( parent !== null && parent !== 1 )
-		//	parent =this._read (parent, result) ;
-		//result.properties =Object.keys (result.properties).map (function (elt) { return (result.properties [elt]) ; }) ;
-		return (result) ;
-	}
+    static get iDISPLAYPRECISION() { return (7); }
 
-	_load (dbPath) {
-		var prs =JsonProperties.dbs.map (function (elt) {
-			return (utils.jsonGzRoot (path.join (dbPath, elt + '.json.gz'))) ;
-		}) ;
-		return (Promise.all (prs)) ;
-	}
+    static get tBoolean() { return (1); }
 
-	_readFull (dbId, result, includeParents) {
-		includeParents =includeParents || false ;
-		var parent =null ;
-		var propStart =2 * this.offs [dbId] ;
-		var propStop =(this.offs.length <= dbId + 1) ? this.avs.length : 2 * this.offs [dbId + 1] ;
-		for ( var i =propStart ; i < propStop ; i +=2 ) {
-			var attr =this.attrs [this.avs [i]] ;
-			var key =attr [JsonProperties.iCATEGORY] + '/' + attr [JsonProperties.iNAME] ;
-			if ( key === '__parent__/parent' ) {
-				parent =parseInt (this.vals [this.avs [i + 1]]) ;
-				result.parents.push (parent) ;
-				continue ;
-			}
-			if ( result.properties.hasOwnProperty (key) )
-				continue ;
-			result.propertiess [key] ={
-				category: attr [JsonProperties.iCATEGORY],
-				name: attr [JsonProperties.iNAME],
-				displayName: attr [JsonProperties.iDISPLAYNAME],
-				type: attr [JsonProperties.iTYPE],
-				value: this.vals [this.avs [i + 1]],
-				unit: attr [JsonProperties.iUNIT],
-				hidden: ((attr [JsonProperties.iFLAGS] & 1) == 1),
-				//id: dbId,
-			} ;
-		}
-		return (parent) ;
-	}
+    static get tColor() { return (2); }
 
-	_read (dbId, result) {
-		var parent =null ;
-		var propStart =2 * this.offs [dbId] ;
-		var propStop =(this.offs.length <= dbId + 1) ? this.avs.length : 2 * this.offs [dbId + 1] ;
-		for ( var i =propStart ; i < propStop ; i +=2 ) {
-			var attr =this.attrs [this.avs [i]] ;
-			var category =attr [JsonProperties.iCATEGORY] ;
-			var key =attr [JsonProperties.iCATEGORY] + '/' + attr [JsonProperties.iNAME] ;
-			// if ( key === '__parent__/parent' ) {
-			// 	parent =parseInt (this.vals [this.avs [i + 1]]) ;
-			// 	result.parents.push (parent) ;
-			// 	continue ;
-			// }
-			if ( key === '__instanceof__/instanceof_objid' ) {
-				// Allright, we need to read teh definition
-				this._read (parseInt (this.vals [this.avs [i + 1]]), result) ;
-				continue ;
-			}
-			if (   key === '__viewable_in__/viewable_in'
-				|| key === '__parent__/parent'
-				|| key === '__child__/child'
-				|| key === '__node_flags__/node_flags'
-				|| key === '__document__/schema_name'
-				|| key === '__document__/schema_version'
-				|| key === '__document__/is_doc_property'
-			) {
-				continue ;
-			}
-			//console.log (key) ;
-			if ( key === '__name__/name' ) {
-				if ( result.name === '' )
-					result.name =this.vals [this.avs [i + 1]] ;
-				continue ;
-			}
-			if ( !result.properties.hasOwnProperty (category) )
-				result.properties [category] ={} ;
+    static get tNumeric() { return (3); }
 
-            if (key !== 'Identity Data/ibcGUID') {
-                key =attr [JsonProperties.iDISPLAYNAME] ;
+    static get tObjectReference() { return (11); }
+
+    static get tString() { return (20); }
+
+    static get tString2() { return (21); }
+
+    get idMax() {
+        return (this.offs.length - 1);
+    }
+
+    load(dbPath) {
+        let self = this;
+        return (new Promise(((fulfill, reject) => {
+            if (propertiesDict.hasOwnProperty(dbPath)) {
+                self = propertiesDict[self.urn];
+                propertiesDict[self.urn].tm = moment().add(1, 'minutes');
+                fulfill(self);
+                return;
             }
-			var value ='' ;
-			if ( attr [JsonProperties.iTYPE] === JsonProperties.tBoolean )
-				value =this.vals [this.avs [i + 1]] === 0 ? 'No' : 'Yes' ;
-			else if ( attr [JsonProperties.iTYPE] === JsonProperties.tColor )
-				value =this.vals [this.avs [i + 1]].toString () ;
-			else if ( attr [JsonProperties.iTYPE] === JsonProperties.tNumeric )
-				value =Number.parseFloat (this.vals [this.avs [i + 1]]).toFixed (3) ;
-			else
-				value =this.vals [this.avs [i + 1]] ;
+            self._load(dbPath)
+                .then((results) => {
+                    propertiesDict[self.urn] = self;
+                    propertiesDict[self.urn].tm = moment().add(1, 'minutes');
+                    JsonProperties.dbs.map((elt, index) => {
+                        const name = elt.substring(8);
+                        self[name] = results[index];
+                    });
+                    fulfill(self);
+                })
+                .catch((error) => {
+                    reject(error);
+                });
+        })));
+    }
 
-			if ( attr [JsonProperties.iUNIT] !== null )
-				value +=' ' + attr [JsonProperties.iUNIT] ;
+    readFull(dbId, includeParents) {
+        includeParents = includeParents || false;
+        dbId = parseInt(dbId, 10);
+        const result = {
+            objectid: dbId,
+            guid: this.ids[dbId],
+            properties: {},
+            parents: [],
+        };
+        let parent = this._readFull(dbId, result);
+        while (includeParents === true && parent !== null && parent !== 1) {
+            parent = this._readFull(parent, result, includeParents);
+        }
+        result.properties = Object.keys(result.properties).map(elt => result.properties[elt]);
+        return (result);
+    }
 
-			//result.properties [category] [key] =value ;
-			if ( result.properties [category].hasOwnProperty (key) ) {
-				if ( !Array.isArray (result.properties [category] [key]) ) {
-					result.properties [category] [key] =[ result.properties [category] [key]] ;
-				}
-				result.properties [category] [key].push (value) ;
-			} else {
-                if (!['', ' ', null, undefined].includes(value)) {
-                    if (attr[0] === 'ibcGUID'){
-                        result.properties[category][attr[0]] = value;
-                    } else {
-                        result.properties [category] [key] =value ;
-                    }
+    read(dbId) {
+        dbId = parseInt(dbId, 10);
+        const result = {
+            objectid: dbId,
+            name: '',
+            externalId: this.ids[dbId],
+            properties: {},
+        };
+        const parent = this._read(dbId, result);
+        // while ( parent !== null && parent !== 1 )
+        //  parent =this._read (parent, result) ;
+        // result.properties =Object.keys (result.properties).map (function (elt) {
+        //  return (result.properties [elt]) ;
+        // }) ;
+        return (result);
+    }
+
+    _load(dbPath) {
+        const prs = JsonProperties.dbs.map(elt => (utils.jsonGzRoot(path.join(dbPath, `${elt}.json.gz`))));
+        return (Promise.all(prs));
+    }
+
+    _readFull(dbId, result, includeParents) {
+        includeParents = includeParents || false;
+        let parent = null;
+        const propStart = 2 * this.offs[dbId];
+        const propStop = (this.offs.length <= dbId + 1) ? this.avs.length : 2 * this.offs[dbId + 1];
+        for (let i = propStart; i < propStop; i += 2) {
+            const attr = this.attrs[this.avs[i]];
+            const key = `${attr[JsonProperties.iCATEGORY]}/${attr[JsonProperties.iNAME]}`;
+            if (key === '__parent__/parent') {
+                parent = parseInt(this.vals[this.avs[i + 1]], 10);
+                result.parents.push(parent);
+                continue;
+            }
+            if (result.properties.hasOwnProperty(key)) { continue; }
+            result.propertiess[key] = {
+                category: attr[JsonProperties.iCATEGORY],
+                name: attr[JsonProperties.iNAME],
+                displayName: attr[JsonProperties.iDISPLAYNAME],
+                type: attr[JsonProperties.iTYPE],
+                value: this.vals[this.avs[i + 1]],
+                unit: attr[JsonProperties.iUNIT],
+                hidden: ((attr[JsonProperties.iFLAGS] & 1) === 1),
+                // id: dbId,
+            };
+        }
+        return (parent);
+    }
+
+    _read(dbId, result) {
+        const parent = null;
+        const propStart = 2 * this.offs[dbId];
+        const propStop = (this.offs.length <= dbId + 1) ? this.avs.length : 2 * this.offs[dbId + 1];
+        for (let i = propStart; i < propStop; i += 2) {
+            const attr = this.attrs[this.avs[i]];
+            const category = attr[JsonProperties.iCATEGORY];
+            let key = `${attr[JsonProperties.iCATEGORY]}/${attr[JsonProperties.iNAME]}`;
+            // if ( key === '__parent__/parent' ) {
+            //  parent =parseInt (this.vals [this.avs [i + 1]]) ;
+            //  result.parents.push (parent) ;
+            //  continue ;
+            // }
+            if (key === '__instanceof__/instanceof_objid') {
+                // Allright, we need to read teh definition
+                this._read(parseInt(this.vals[this.avs[i + 1]], 10), result);
+                continue;
+            }
+            if (key === '__viewable_in__/viewable_in'
+                || key === '__parent__/parent'
+                || key === '__child__/child'
+                || key === '__node_flags__/node_flags'
+                || key === '__document__/schema_name'
+                || key === '__document__/schema_version'
+                || key === '__document__/is_doc_property'
+            ) {
+                continue;
+            }
+            // console.log (key) ;
+            if (key === '__name__/name') {
+                if (result.name === '') { result.name = this.vals[this.avs[i + 1]]; }
+                continue;
+            }
+            if (!result.properties.hasOwnProperty(category)) { result.properties[category] = {}; }
+            if (key !== 'Identity Data/ibcGUID') {
+                key = attr[JsonProperties.iDISPLAYNAME];
+            }
+            let value = '';
+            if (attr[JsonProperties.iTYPE] === JsonProperties.tBoolean) { value = this.vals[this.avs[i + 1]] === 0 ? 'No' : 'Yes'; } else if (attr[JsonProperties.iTYPE] === JsonProperties.tColor) { value = this.vals[this.avs[i + 1]].toString(); } else if (attr[JsonProperties.iTYPE] === JsonProperties.tNumeric) { value = Number.parseFloat(this.vals[this.avs[i + 1]]).toFixed(3); } else { value = this.vals[this.avs[i + 1]]; }
+
+            if (attr[JsonProperties.iUNIT] !== null) { value += ` ${attr[JsonProperties.iUNIT]}`; }
+
+            // result.properties [category] [key] =value ;
+            if (result.properties[category].hasOwnProperty(key)) {
+                if (!Array.isArray(result.properties[category][key])) {
+                    result.properties[category][key] = [result.properties[category][key]];
                 }
-			}
-		}
-		// Sorting objects
-		Object.keys (result.properties).sort ().every (function (cat) {
-			var r ={} ;
-			Object.keys (result.properties [cat]).sort ().every (function (elt) {
-				r [elt] =result.properties [cat] [elt] ;
-				return (true) ;
-			}) ;
-			delete result.properties [cat] ;
-			result.properties [cat] =r ;
-			return (true) ;
-		}) ;
-		return (parent) ;
-	}
-
+                result.properties[category][key].push(value);
+            } else if (!['', ' ', null, undefined].includes(value)) {
+                if (attr[0] === 'ibcGUID') {
+                    result.properties[category][attr[0]] = value;
+                } else {
+                    result.properties[category][key] = value;
+                }
+            }
+        }
+        // Sorting objects
+        Object.keys(result.properties).sort().every((cat) => {
+            const r = {};
+            Object.keys(result.properties[cat]).sort().every((elt) => {
+                r[elt] = result.properties[cat][elt];
+                return (true);
+            });
+            delete result.properties[cat];
+            result.properties[cat] = r;
+            return (true);
+        });
+        return (parent);
+    }
 }
 
-var jobs ={} ;
+const jobs = {};
 class BubbleAccess {
+    static getManifest(urn, _forgeToken) {
+        // Verify the required parameter 'urn' is set
+        if ([undefined, null].includes(urn)) {
+            return Promise.reject(
+                new Error("Missing the required parameter 'urn' when calling getManifest"),
+            );
+        }
+        const token = getToken(urn, _forgeToken);
+        jobs[urn].status = 'started';
+        jobs[urn].progress = 0;
+        const { apiClient } = new DerivativesApi();
+        return apiClient.callApi(
+            '/derivativeservice/v2/manifest/{urn}', 'GET',
+            { urn }, {}, { },
+            {}, null,
+            [], ['application/vnd.api+json', 'application/json'], null,
+            token, token.credentials,
+        );
+    }
 
-	static getManifest (urn, _forgeToken) {
-		_forgeToken =_forgeToken || forgeToken ;
-		// Verify the required parameter 'urn' is set
-		if ( urn === undefined || urn === null )
-			return (Promise.reject ("Missing the required parameter 'urn' when calling getManifest")) ;
-		var ModelDerivative =new ForgeSDK.DerivativesApi () ;
-		jobs [urn].status ='started' ;
-		jobs [urn].progress =0 ;
-		return (ModelDerivative.apiClient.callApi (
-			'/derivativeservice/v2/manifest/{urn}', 'GET',
-			{ 'urn': urn }, {}, { /*'Accept-Encoding': 'gzip, deflate'*/ },
-			{}, null,
-			[], [ 'application/vnd.api+json', 'application/json' ], null,
-			_forgeToken, _forgeToken.credentials
-		)) ;
-	}
+    static extractPathsFromGraphicsUrn(urn, result) {
+        // This needs to be done for encoded OSS URNs, because the paths
+        // in there are url encoded and lose the / character.
+        urn = decodeURIComponent(urn);
+        const basePath = urn.slice(0, urn.lastIndexOf('/') + 1);
+        let localPath = basePath.slice(basePath.indexOf('/') + 1);
+        const urnBase = basePath.slice(0, basePath.indexOf('/'));
+        localPath = localPath.replace(/^output\//, '');
+        // For supporting compound bubbles, we need to prefix
+        // by sub-urn as well, otherwise files might clash.
+        // var localPrefix = urnBase
+        //  ? crypto.createHash('md5').update(urnBase).digest("hex") + "/"
+        //  : "";
+        const localPrefix = '';
+        result.urn = urn;
+        result.basePath = basePath;
+        result.localPath = localPrefix + localPath;
+        result.rootFileName = urn.slice(urn.lastIndexOf('/') + 1);
+    }
 
-	static extractPathsFromGraphicsUrn (urn, result) {
-		// This needs to be done for encoded OSS URNs, because the paths
-		// in there are url encoded and lose the / character.
-		urn =decodeURIComponent (urn) ;
-		var basePath =urn.slice (0, urn.lastIndexOf ('/') + 1) ;
-		var localPath =basePath.slice (basePath.indexOf ('/') + 1) ;
-		var urnBase =basePath.slice (0, basePath.indexOf ('/')) ;
-		localPath =localPath.replace (/^output\//, '') ;
-		// For supporting compound bubbles, we need to prefix
-		// by sub-urn as well, otherwise files might clash.
-		// var localPrefix = urnBase ? crypto.createHash('md5').update(urnBase).digest("hex") + "/" : "";
-		var localPrefix ='' ;
-		result.urn =urn ;
-		result.basePath =basePath ;
-		result.localPath =localPrefix + localPath ;
-		result.rootFileName =urn.slice (urn.lastIndexOf ('/') + 1) ;
-	}
+    static listAllDerivativeFiles(bubble, callback) {
+        const modelURN = bubble.urn;
+        // First get all the root derivative files from the bubble
+        const res = [];
+        (function traverse(node, parent) {
+            if (node.role === 'Autodesk.CloudPlatform.PropertyDatabase') {
+                const item = { mime: node.mime };
+                BubbleAccess.extractPathsFromGraphicsUrn(node.urn, item);
+                node.urn = `$file$/${item.localPath}${item.rootFileName}`;
+                item.modelURN = modelURN;
+                res.push(item);
+                return;
+            }
+            if (node.children && res.length === 0) {
+                node.children.forEach((child) => {
+                    if (res.length === 0) { traverse(child, node); }
+                });
+            }
+        }(bubble, null));
 
-	static listAllDerivativeFiles (bubble, callback) {
-		var self =this ;
-		var modelURN =bubble.urn ;
-		// First get all the root derivative files from the bubble
-		var res =[] ;
-		(function traverse (node, parent) {
-			if ( node.role === 'Autodesk.CloudPlatform.PropertyDatabase' ) {
-				var item ={ mime: node.mime } ;
-				BubbleAccess.extractPathsFromGraphicsUrn (node.urn, item) ;
-				node.urn ='$file$/' + item.localPath + item.rootFileName ;
-				item.modelURN =modelURN ;
-				res.push (item) ;
-				return ;
-			}
-			if ( node.children && res.length === 0 ) {
-				node.children.forEach (function (child) {
-					if ( res.length === 0 )
-						traverse (child, node) ;
-				}) ;
-			}
-		}) (bubble, null) ;
+        if (res.length === 0) { return (callback('DB not found', null)); }
 
-		if ( res.length === 0 )
-			return (callback ('DB not found', null)) ;
+        let current = 0;
+        let done = 0;
+        const processOne = () => {
+            const onProgress = () => {
+                done++;
+                // console.log ('Manifests done ', done) ;
+                if (done === res.length) {
+                    const result = {
+                        list: res,
+                    };
+                    callback(null, result);
+                } else {
+                    setTimeout(processOne, 0);
+                }
+            };
 
-		var current =0 ;
-		var done =0 ;
-		var processOne =function () {
-			function onProgress () {
-				done++ ;
-				//console.log ('Manifests done ', done) ;
-				if ( done === res.length ) {
-					var result ={
-						list: res
-					} ;
-					callback (null, result) ;
-				} else {
-					setTimeout (processOne, 0) ;
-				}
-			}
+            if (current >= res.length) { return; }
+            const rootItem = res[current++];
+            rootItem.files = [];
+            const { files } = rootItem;
+            if (rootItem.mime === 'application/autodesk-db') {
+                // The file list for property database files is fixed,
+                // no need to go to the server to find out
+                files.push('objects_attrs.json.gz');
+                files.push('objects_vals.json.gz');
+                files.push('objects_avs.json.gz');
+                files.push('objects_offs.json.gz');
+                files.push('objects_ids.json.gz');
+                onProgress();
+            }
+        };
+        // Kick off 6 parallel jobs
+        for (let k = 0; k < 6; k++) { processOne(); }
+    }
 
-			if ( current >= res.length )
-				return ;
-			var rootItem =res [current++] ;
-			var files =rootItem.files =[] ;
-			if ( rootItem.mime === 'application/autodesk-db' ) {
-				// The file list for property database files is fixed,
-				// no need to go to the server to find out
-				files.push ('objects_attrs.json.gz') ;
-				files.push ('objects_vals.json.gz') ;
-				files.push ('objects_avs.json.gz') ;
-				files.push ('objects_offs.json.gz' );
-				files.push ('objects_ids.json.gz') ;
-				onProgress () ;
-			}
-		} ;
-		// Kick off 6 parallel jobs
-		for ( var k =0 ; k < 6 ; k++ )
-			processOne () ;
-	}
+    static downloadAllDerivativeFiles(urn, fileList, destDir, _forgeToken, callback) {
+        const token = getToken(urn, _forgeToken);
+        let succeeded = 0;
+        let failed = 0;
+        const flatList = [];
+        for (let i = 0; i < fileList.length; i++) {
+            const item = fileList[i];
+            for (let j = 0; j < item.files.length; j++) {
+                const flatItem = {
+                    basePath: item.basePath,
+                    localPath: destDir, // + item.localPath,
+                    fileName: item.files[j],
+                    modelURN: item.modelURN,
+                };
+                if (item.name) { flatItem.name = item.name; }
+                if (item.urn) {
+                    flatItem.urn = item.urn;
+                    flatItem.guid = item.guid;
+                    flatItem.mime = item.mime;
+                }
+                flatList.push(flatItem);
+            }
+        }
+        // console.log (JSON.stringify (flatList, null, 2)) ;
+        if (flatList.length === 0) { return (callback(failed, succeeded)); }
+        let current = 0;
+        let done = 0;
+        const downloadOneItem = () => {
+            if (current >= flatList.length) { return; }
+            const fi = flatList[current++];
+            const downloadComplete = (error, success) => {
+                done++;
+                if (error) {
+                    failed++;
+                    console.error('Failed to download file:', fi.fileName, fi.modelURN, error);
+                } else {
+                    succeeded++;
+                    console.log('Downloaded:', fi.fileName, fi.modelURN);
+                }
+                jobs[urn].progress = (100 * (failed + succeeded) / flatList.length) | 0;
+                // console.log ('Progress: ', jobs [urn].progress, '%') ;
+                if (done === flatList.length) {
+                    callback(flatList);
+                } else {
+                    setTimeout(downloadOneItem, 0);
+                }
+            };
+            // console.log ((fi.basePath + '/' + fi.fileName).replace (/\/\//g, '/')) ;
+            // console.log (path.join (fi.localPath, fi.modelURN, fi.fileName));
+            BubbleAccess.getItem(
+                (`${fi.basePath}/${fi.fileName}`).replace(/\/\//g, '/'),
+                path.join(fi.localPath, fi.modelURN, fi.fileName),
+                token,
+                downloadComplete,
+            );
+        };
+        // Kick off 10 parallel jobs
+        for (let k = 0; k < 10; k++) { downloadOneItem(); }
+    }
 
-	static downloadAllDerivativeFiles (urn, fileList, destDir, _forgeToken, callback) {
-		var self =this ;
-		var succeeded =0 ;
-		var failed =0 ;
-		var flatList =[] ;
-		for ( var i =0 ; i < fileList.length ; i++ ) {
-			var item =fileList [i] ;
-			for (var j =0 ; j < item.files.length ; j++ ) {
-				var flatItem ={
-					basePath: item.basePath,
-					localPath: destDir, // + item.localPath,
-					fileName: item.files [j],
-					modelURN: item.modelURN
-				} ;
-				if ( item.name )
-					flatItem.name =item.name ;
-				if ( item.urn ) {
-					flatItem.urn =item.urn ;
-					flatItem.guid =item.guid ;
-					flatItem.mime =item.mime ;
-				}
-				flatList.push (flatItem) ;
-			}
-		}
-		//console.log (JSON.stringify (flatList, null, 2)) ;
-		if ( flatList.length === 0 )
-			return (callback (failed, succeeded)) ;
-		var current =0 ;
-		var done =0 ;
-		var downloadOneItem =function () {
-			if ( current >= flatList.length )
-				return ;
-			var fi =flatList [current++] ;
-			var downloadComplete =function (error, success) {
-				done++ ;
-				if ( error ) {
-					failed++ ;
-					console.error ('Failed to download file:', fi.fileName, fi.modelURN, error) ;
-				} else {
-					succeeded++ ;
-					console.log ('Downloaded:', fi.fileName, fi.modelURN) ;
-				}
-				jobs [urn].progress =(100 * (failed + succeeded) / flatList.length) | 0 ;
-				//console.log ('Progress: ', jobs [urn].progress, '%') ;
-				if ( done === flatList.length )
-					callback (flatList) ;
-				else
-					setTimeout (downloadOneItem, 0) ;
-			} ;
-			//console.log ((fi.basePath + '/' + fi.fileName).replace (/\/\//g, '/')) ;
-			//console.log (path.join (fi.localPath, fi.modelURN, fi.fileName));
-			BubbleAccess.getItem (
-				(fi.basePath + '/' + fi.fileName).replace (/\/\//g, '/'),
-				path.join (fi.localPath, fi.modelURN, fi.fileName),
-				_forgeToken,
-				downloadComplete
-			) ;
-		} ;
-		// Kick off 10 parallel jobs
-		for ( var k =0 ; k < 10 ; k++ )
-			downloadOneItem () ;
-	}
+    static downloadItem(urn, _forgeToken) {
+        if ([undefined, null].includes(urn)) {
+            return Promise.reject(
+                new Error("Missing the required parameter 'urn' when calling downloadItem"),
+            );
+        }
+        const token = getToken(urn, _forgeToken);
+        const { apiClient } = new DerivativesApi();
+        return apiClient.callApi(
+            '/derivativeservice/v2/derivatives/{urn}', 'GET',
+            { urn }, {}, { 'Accept-Encoding': 'gzip, deflate' },
+            {}, null,
+            [], [], null,
+            token, token.credentials,
+        );
+    }
 
-	static downloadItem (urn, _forgeToken) {
-		_forgeToken =_forgeToken || forgeToken ;
-		// Verify the required parameter 'urn' is set
-		if ( urn === undefined || urn === null )
-			return (Promise.reject ("Missing the required parameter 'urn' when calling downloadItem")) ;
-		var ModelDerivative =new ForgeSDK.DerivativesApi () ;
-		return (ModelDerivative.apiClient.callApi (
-			'/derivativeservice/v2/derivatives/{urn}', 'GET',
-			{ 'urn': urn }, {}, { 'Accept-Encoding': 'gzip, deflate' },
-			{}, null,
-			[], [], null,
-			_forgeToken, _forgeToken.credentials
-		)) ;
-	}
+    static openWriteStream(outFile) {
+        let wstream;
+        if (outFile) {
+            try {
+                mkdirp.sync(path.dirname(outFile));
+                wstream = fs.createWriteStream(outFile);
+            } catch (e) {
+                console.error('Error:', e.message);
+            }
+        }
+        return (wstream);
+    }
 
-	static openWriteStream (outFile) {
-		var wstream ;
-		if ( outFile ) {
-			try {
-				mkdirp.sync (path.dirname (outFile)) ;
-				wstream =fs.createWriteStream (outFile) ;
-			} catch ( e ) {
-				console.error ('Error:', e.message) ;
-			}
-		}
-		return (wstream) ;
-	}
-
-	static getItem (itemUrn, outFile, _forgeToken, callback) {
-		var self =this ;
-		//console.log ('-> ' + itemUrn) ;
-		BubbleAccess.downloadItem (itemUrn, _forgeToken)
-			.then (function (response) {
-				if ( response.statusCode !== 200 )
-					return (callback (response.statusCode)) ;
-				// Skip unzipping of items to make the downloaded content compatible with viewer debugging
-				var wstream =BubbleAccess.openWriteStream (outFile) ;
-				if ( wstream ) {
-					wstream.write (typeof response.body == 'object' && path.extname (outFile) === '.json' ? JSON.stringify (response.body) : response.body) ;
-					wstream.end () ;
-					callback (null, response.statusCode) ;
-				} else {
-					callback (null, response.body) ;
-				}
-			})
-			.catch (function (error) {
-				console.error ('Error:', error.message) ;
-				callback (error, null) ;
-			})
-		;
-	}
-
+    static getItem(urn, outFile, _forgeToken, callback) {
+        const token = getToken(urn, _forgeToken);
+        BubbleAccess.downloadItem(urn, token)
+            .then(({ statusCode, body }) => {
+                if (statusCode !== 200) {
+                    return callback(statusCode);
+                }
+                // Skip unzipping of items
+                // to make the downloaded content compatible with viewer debugging
+                const wstream = BubbleAccess.openWriteStream(outFile);
+                if (wstream) {
+                    wstream.write(
+                        typeof body === 'object' && path.extname(outFile) === '.json'
+                            ? JSON.stringify(body)
+                            : body,
+                    );
+                    wstream.end();
+                    callback(null, statusCode);
+                } else {
+                    callback(null, body);
+                }
+            })
+            .catch((error) => {
+                console.error('Error:', error.message);
+                callback(error, null);
+            });
+    }
 }
 
-function returnJsonPayload (json, compMethod, res) {
-	switch ( compMethod ) {
-		default:
-			res.json (json) ;
-			//utils.logTimeStamp (req.params.urn) ;
-			break ;
-		case 'gzip':
-		case 'deflate':
-			res.setHeader ('Content-Type', 'application/json') ;
-			res.setHeader ('Content-Encoding', compMethod) ;
+function returnJsonPayload(json, compMethod, res) {
+    switch (compMethod) {
+    default:
+        res.json(json);
+        // utils.logTimeStamp (req.params.urn) ;
+        break;
+    case 'gzip':
+    case 'deflate':
+        res.setHeader('Content-Type', 'application/json');
+        res.setHeader('Content-Encoding', compMethod);
 
-			var buf =new Buffer (JSON.stringify (json), 'utf-8') ;
-			if ( compMethod == 'gzip' ) {
-				zlib.gzip (buf, function (_, result) {
-					res.setHeader ('Content-Length', result.length) ;
-					res.end (result) ;
-				}) ;
-			} else {
-				zlib.deflate (buf, function (_, result) {
-					res.setHeader ('Content-Length', result.length) ;
-					res.end (result) ;
-				}) ;
-			}
-			break ;
-	}
+        zlib[compMethod](Buffer.from(JSON.stringify(json), 'utf-8'), (_, result) => {
+            res.setHeader('Content-Length', result.length);
+            res.end(result);
+        });
+        break;
+    }
 }
 
-router.get ('/:urn/load/progress', function (req, res) {
-	var urn =utils._safeBase64encode (req.params.urn) ;
-	console.log ('jobs: ' + JSON.stringify (jobs, null, 2)) ;
-	if ( jobs.hasOwnProperty (urn) )
-		return (res.status (201).json (jobs [urn])) ;
-	var outPath =utils.dataPath (urn, '') ;
-	utils.fileexists (outPath)
-		.then (function (bExists) {
-			if ( bExists === true )
-				res.status (200).json ({ status: 'completed', progress: 100 }) ;
-			else
-				res.status (404).end () ;
-		})
-		.catch (function (err) {
-			res.status (500).end () ;
-		}) ;
-}) ;
+router.get('/:urn/load/progress', (req, res) => {
+    const urn = getUrn(req);
+    console.log(`jobs: ${JSON.stringify(jobs, null, 2)}`);
+    if (jobs.hasOwnProperty(urn)) {
+        return res.status(201).json(jobs[urn]);
+    }
+    utils.fileexists(utils.dataPath(urn, ''))
+        .then((bExists) => {
+            if (bExists) {
+                res.status(200).json({ status: 'completed', progress: 100 });
+            } else {
+                res.status(404).end();
+            }
+        })
+        .catch(() => {
+            res.status(500).end();
+        });
+});
 
-router.get ('/:urn/load', function (req, res) {
-	var urn =utils._safeBase64encode (req.params.urn) ;
-	if ( jobs.hasOwnProperty (urn) && jobs [urn].status !== 'failed' )
-		return (res.status (201).json (jobs [urn])) ;
-	var bearer =utils.authorization (req) ;
-	var localForgeToken =forgeToken ;
-	if ( bearer !== null ) {
-		localForgeToken =new ForgeSDK.AuthClientTwoLegged (config.credentials.client_id, config.credentials.client_secret, config.credentials.scope) ;
-		localForgeToken.credentials.token_type ='Bearer' ;
-		localForgeToken.credentials.expires_in =3599 ;
-		localForgeToken.credentials.access_token =bearer ;
-	}
-	var outPath =utils.dataPath ('', '') ;
-	jobs [urn] ={ status: 'accepted' } ;
-	BubbleAccess.getManifest (urn, localForgeToken)
-		.then (function (bubble) {
-			//console.log (JSON.stringify (bubble, null, 2)) ;
-			res.status (201).json (jobs [urn]) ;
+router.get('/:urn/load', (req, res) => {
+    const { credentials } = config;
+    const urn = getUrn(req);
+    if (jobs.hasOwnProperty(urn) && jobs[urn].status !== 'failed') {
+        return res.status(201).json(jobs[urn]);
+    }
+    let token = getToken(urn);
+    if (!credentials.HAS_DEFAULTS) {
+        const bearer = utils.authorization(req);
+        if (bearer !== null) {
+            const { client_id: id, client_secret: secret, scope } = credentials;
+            token = new AuthClientTwoLegged(id, secret, scope);
+            Object.assign(token.credentials, {
+                token_type: 'Bearer',
+                expires_in: 3599,
+                access_token: bearer,
+            });
+        }
+    }
+    jobs[urn] = { status: 'accepted' };
+    BubbleAccess.getManifest(urn, token)
+        .then((bubble) => {
+            // console.log (JSON.stringify (bubble, null, 2)) ;
+            res.status(201).json(jobs[urn]);
+            BubbleAccess.listAllDerivativeFiles(bubble.body, (error, result) => {
+                if (error !== null || result === null) {
+                    delete jobs[urn];
+                    return;
+                }
+                // console.log (JSON.stringify (result, null, 2)) ;
+                // var filesToFetch =result.list [0].files.length ;
+                // console.log ('Number of files to fetch:', filesToFetch) ;
+                jobs[urn].status = 'inprogress';
+                jobs[urn].progress = 0;
+                // console.log (JSON.stringify (result, null, 2)) ;
+                const outPath = utils.dataPath('', '');
+                BubbleAccess.downloadAllDerivativeFiles(urn, result.list, outPath, token, () => {
+                    delete jobs[urn];
+                });
+            });
+        })
+        .catch((error) => {
+            console.error(error);
+            jobs[urn] = { status: 'failed', error };
+            res.status(500).end();
+        });
+});
 
-			BubbleAccess.listAllDerivativeFiles (bubble.body, function (error, result) {
-				if ( error !== null || result === null ) {
-					delete jobs [urn] ;
-					return ;
-				}
-				//console.log (JSON.stringify (result, null, 2)) ;
-				var filesToFetch =result.list [0].files.length ;
-				//console.log ('Number of files to fetch:', filesToFetch) ;
-				jobs [urn].status ='inprogress' ;
-				jobs [urn].progress =0 ;
-				//console.log (JSON.stringify (result, null, 2)) ;
-				BubbleAccess.downloadAllDerivativeFiles (urn, result.list, outPath, localForgeToken, function (flatList) {
-					delete jobs [urn] ;
-				}) ;
-			}) ;
-		})
-		.catch (function (error) {
-			console.error (error) ;
-			jobs [urn] ={ status: 'failed', error: error } ;
-			res.status (500).end () ;
-		}) ;
-}) ;
-
-router.delete ('/:urn', function (req, res) {
-	var urn =utils._safeBase64encode (req.params.urn) ;
-	if ( jobs.hasOwnProperty (urn) )
-		delete jobs [urn] ;
-	var outPath =utils.dataPath (urn, '') ;
-	utils.rimraf (outPath)
-		.then (function (pathname) {
-			res.status (200).end () ;
-		})
-		.catch (function (err) {
-			res.status (500).end () ;
-		}) ;
-}) ;
+router.delete('/:urn', (req, res) => {
+    const urn = getUrn(req);
+    if (jobs.hasOwnProperty(urn)) {
+        delete jobs[urn];
+    }
+    if (config.credentials.HAS_DEFAULTS && getToken(urn)) {
+        forgeToken.delete(urn);
+    }
+    utils.rimraf(utils.dataPath(urn, ''))
+        .then(() => {
+            res.status(200).end();
+        })
+        .catch(() => {
+            res.status(500).end();
+        });
+});
 
 // Request Object(s)' properties
 // set the structure to be equal to the metadata MD payload
-router.get ('/:urn/properties/*', function (req, res) {
-	var urn =utils._safeBase64encode (req.params.urn) ;
-	var outPath =utils.dataPath (urn, '') ;
-	var dbIds =utils.csv (req.params [0]) ; // csv format
-	var compMethod =utils.accepts (req) ;
+router.get('/:urn/properties/*', (req, res) => {
+    const urn = getUrn(req);
+    let dbIds = utils.csv(req.params[0]); // csv format
+    const compMethod = utils.accepts(req);
 
-	var props =new JsonProperties (urn) ;
-	//props.dbIds =dbIds ;
-	props.load (outPath)
-		.then (function (result) {
-			var json ={
-				data: {
-					type: "properties",
-					collection: []
-				}
-			} ;
+    const props = new JsonProperties(urn);
+    // props.dbIds =dbIds ;
+    props.load(utils.dataPath(urn, ''))
+        .then((result) => {
+            const json = {
+                data: {
+                    type: 'properties',
+                    collection: [],
+                },
+            };
 
-			if ( dbIds.includes ('*') ) {
-				var max =result.idMax ;
-				dbIds =[] ;
-				// can become a problem if the size is too big (call stack)
-				//dbIds =Array.apply (null, { length: max }).map (function (e, i) { return (i + 1) ; }) ;
-				for ( var i =1 ; i <= max ; i++ )
-					dbIds.push (i) ;
-			}
-			dbIds.map (function (elt) {
-				if ( elt > result.idMax )
-					throw new Error ('objID out of range!') ;
-				var obj =result.read (elt) ;
-				if ( obj != null )
-					json.data.collection.push (obj) ;
-			}) ;
-			//res.json (json) ;
-			returnJsonPayload (json, compMethod, res) ;
-		})
-		.catch (function (err) {
-			console.error (err) ;
-			//res.status (err.code || err.statusCode).end (err.message | err.statusMessage) ;
-			utils.returnResponseError (res, err) ;
-		}) ;
-}) ;
+            if (dbIds.includes('*')) {
+                const max = result.idMax;
+                dbIds = [];
+                // can become a problem if the size is too big (call stack)
+                // dbIds =Array.apply (null, { length: max }).map (function (e, i) {
+                //  return (i + 1) ;
+                // }) ;
+                for (let i = 1; i <= max; i++) { dbIds.push(i); }
+            }
+            dbIds.map((elt) => {
+                if (elt > result.idMax) { throw new Error('objID out of range!'); }
+                const obj = result.read(elt);
+                if (obj != null) { json.data.collection.push(obj); }
+            });
+            // res.json (json) ;
+            returnJsonPayload(json, compMethod, res);
+        })
+        .catch((err) => {
+            console.error(err);
+            // res.status (err.code || err.statusCode).end (err.message | err.statusMessage) ;
+            utils.returnResponseError(res, err);
+        });
+});
 
-router.get ('/:urn/ids/*', function (req, res) {
-	var urn =utils._safeBase64encode (req.params.urn) ;
-	var outPath =utils.dataPath (urn, '') ;
-	var dbIds =utils.csv (req.params [0]) ; // csv format
-	var compMethod =utils.accepts (req) ;
+router.get('/:urn/ids/*', (req, res) => {
+    const urn = getUrn(req);
+    let dbIds = utils.csv(req.params[0]); // csv format
+    const compMethod = utils.accepts(req);
 
-	var props =new JsonProperties (urn) ;
-	//props.dbIds =dbIds ;
-	props.load (outPath)
-		.then (function (result) {
-			var json ={
-				data: {
-					type: "ids",
-					collection: []
-				}
-			} ;
+    const props = new JsonProperties(urn);
+    // props.dbIds =dbIds ;
+    props.load(utils.dataPath(urn, ''))
+        .then((result) => {
+            const json = {
+                data: {
+                    type: 'ids',
+                    collection: [],
+                },
+            };
 
-			if ( dbIds.includes ('range') ) {
-				dbIds =[] ;
-				json.idMax =result.idMax ;
-					}
-			if ( dbIds.includes ('*') ) {
-				var max =result.idMax ;
-				dbIds =[] ;
-				//dbIds =Array.apply (null, { length: max }).map (Number.call, Number) ;
-				// can become a problem if the size is too big (call stack)
-				//dbIds =Array.apply (null, { length: max }).map (function (e, i) { return (i + 1) ; }) ;
-				for ( var i =1 ; i <= max ; i++ )
-					dbIds.push (i) ;
-			}
-			dbIds.map (function (elt, index) {
-				if ( elt > result.idMax )
-					throw new Error ('objID out of range!') ;
-				//json.data.collection.push (result.ids [elt]) ;
-				var obj ={ dbId: elt, externalID: result.ids [elt] } ;
-				json.data.collection.push (obj) ;
-			}) ;
+            if (dbIds.includes('range')) {
+                dbIds = [];
+                json.idMax = result.idMax;
+            }
+            if (dbIds.includes('*')) {
+                const max = result.idMax;
+                dbIds = [];
+                // dbIds =Array.apply (null, { length: max }).map (Number.call, Number) ;
+                // can become a problem if the size is too big (call stack)
+                // dbIds =Array.apply (null, { length: max }).map (function (e, i) {
+                //  return (i + 1) ;
+                // }) ;
+                for (let i = 1; i <= max; i++) { dbIds.push(i); }
+            }
+            dbIds.map((elt, index) => {
+                if (elt > result.idMax) { throw new Error('objID out of range!'); }
+                // json.data.collection.push (result.ids [elt]) ;
+                const obj = { dbId: elt, externalID: result.ids[elt] };
+                json.data.collection.push(obj);
+            });
 
-			//res.json (json) ;
-			returnJsonPayload (json, compMethod, res) ;
-		})
-		.catch (function (err) {
-			console.error (err) ;
-			//res.status (err.code || err.statusCode).end (err.message | err.statusMessage) ;
-			utils.returnResponseError (res, err) ;
-		}) ;
-}) ;
+            // res.json (json) ;
+            returnJsonPayload(json, compMethod, res);
+        })
+        .catch((err) => {
+            console.error(err);
+            // res.status (err.code || err.statusCode).end (err.message | err.statusMessage) ;
+            utils.returnResponseError(res, err);
+        });
+});
 
-module.exports =router ;
+router.post('/refreshToken', ({ body: { clientId, urn, token } }, res) => {
+    forgeToken.refresh({ clientId, urn, token });
+    res.status(200).json({ status: 'tokenRefreshed' });
+});
+
+module.exports = router;
