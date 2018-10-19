@@ -17,21 +17,38 @@
 // Forge Property Server
 // by Cyrille Fauvel - Autodesk Developer Network (ADN)
 //
-'use strict' ;
 
-var config ={
+/* eslint camelcase: 0 */
 
-	credentials: {
-		// Replace placeholder below by the Consumer Key and Consumer Secret you got from
-		// http://developer.autodesk.com/ for the production server
-		client_id: process.env.FORGE_CLIENT_ID || '<replace with your consumer key>',
-		client_secret: process.env.FORGE_CLIENT_SECRET || '<replace with your consumer secret>',
-		grant_type: 'client_credentials',
-		scope: ['data:read', 'data:search', 'bucket:read', 'viewables:read' ]
-	},
-	callback: process.env.FORGE_CALLBACK,
-	apiEndpoint: 'developer.api.autodesk.com'
+const { FORGE_CLIENT_ID, FORGE_CLIENT_SECRET, PORT } = require('./defaults');
 
-} ;
+const { env } = process;
 
-module.exports =config ;
+const client_id = env.FORGE_CLIENT_ID || FORGE_CLIENT_ID;
+const client_secret = env.FORGE_CLIENT_SECRET || FORGE_CLIENT_SECRET;
+const callback = env.FORGE_CALLBACK;
+const port = env.PORT || PORT;
+
+const HAS_DEFAULTS = client_id === FORGE_CLIENT_ID || client_secret === FORGE_CLIENT_SECRET;
+const HAS_CALLBACK = callback !== undefined;
+
+const config = {
+    credentials: {
+        client_id,
+        client_secret,
+        HAS_DEFAULTS,
+        grant_type: 'client_credentials',
+        scope: [
+            'data:read',
+            'data:search',
+            'bucket:read',
+            'viewables:read',
+        ],
+    },
+    callback,
+    HAS_CALLBACK,
+    apiEndpoint: 'developer.api.autodesk.com',
+    port,
+};
+
+module.exports = config;
