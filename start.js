@@ -31,9 +31,8 @@ const {
         client_id: apiKey,
         HAS_DEFAULTS,
     },
+    port,
 } = require('./server/config');
-
-const port = app.get('port');
 
 const server = app.listen(port, () => {
     if (!HAS_DEFAULTS) {
