@@ -17,17 +17,26 @@
 // Forge Property Server
 // by Cyrille Fauvel - Autodesk Developer Network (ADN)
 //
-'use strict' ;
 
-var express =require ('express') ;
-var bodyParser =require ('body-parser') ;
-var forgeToken =require ('./forge-token') ;
+/* eslint global-require: 0 */
 
-var app =express () ;
-//app.use (bodyParser.urlencoded ({ extended: true })) ;
-app.use (bodyParser.json ()) ;
-app.use('/', require('./3legged'));
-app.use ('/data', require ('./properties')) ;
-app.set ('port', process.env.PORT || 80) ; // main port
+const express = require('express');
+const bodyParser = require('body-parser');
 
-module.exports =app ;
+const {
+    HAS_CALLBACK,
+    port,
+} = require('./config');
+
+const app = express();
+
+app.use(bodyParser.json());
+
+if (HAS_CALLBACK) {
+    app.use('/', require('./3legged'));
+}
+app.use('/data', require('./properties'));
+
+app.set('port', port);
+
+module.exports = app;
