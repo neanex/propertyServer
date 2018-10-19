@@ -25,5 +25,10 @@
     "mkdirp": "^0.5.1",
     "moment": "~> 2.19.3",
     "rimraf": "^2.6.1"
+  },
+  "devDependencies": {
+    "eslint": "^5.7.0",
+    "eslint-config-airbnb-base": "^13.1.0",
+    "eslint-plugin-import": "^2.14.0"
   }
 }
