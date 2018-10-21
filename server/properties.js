@@ -589,12 +589,15 @@ router.get('/:urn/load', (req, res) => {
 });
 
 router.delete('/:urn', (req, res) => {
+    console.log('inside delete propertyserver')
     const urn = getUrn(req);
     if (jobs.hasOwnProperty(urn)) {
         delete jobs[urn];
     }
     if (config.credentials.HAS_DEFAULTS && getToken(urn)) {
+        console.log('remove from forgetoken', urn)
         forgeToken.delete(urn);
+        console.log(forgeToken)
     }
     utils.rimraf(utils.dataPath(urn, ''))
         .then(() => {
@@ -695,6 +698,7 @@ router.get('/:urn/ids/*', (req, res) => {
 });
 
 router.post('/refreshToken', ({ body: { clientId, urn, token } }, res) => {
+    console.log('refreshing token', clientId, urn, token)
     forgeToken.refresh({ clientId, urn, token });
     res.status(200).json({ status: 'tokenRefreshed' });
 });
