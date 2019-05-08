@@ -23,4 +23,4 @@ COPY --from=dependencies /nodejs/prod_node_modules ./node_modules
 # copy app sources
 COPY . .
 # Start the project
-CMD npm start
+CMD npm PORT=8000 start
